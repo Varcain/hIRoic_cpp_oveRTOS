@@ -3,7 +3,7 @@
 C++ port of the hIRoic real-time guitar cabinet impulse response (IR)
 convolution app, built on the [oveRTOS](https://github.com/varcain/oveRTOS)
 RTOS abstraction framework.  Same audio pipeline and feature set as the
-[C variant](../hiroic/README.md), exercised through the C++20 `ove::*`
+[C variant](https://github.com/Varcain/hIRoic_oveRTOS), exercised through the C++20 `ove::*`
 binding.  Runs on the STM32F746G-Discovery board across FreeRTOS, Apache
 NuttX, and Zephyr — and on the host POSIX simulator — from a single
 codebase with zero `#ifdef` guards for RTOS.
@@ -66,7 +66,7 @@ as `int` return codes with `[[nodiscard]]` discipline, never thrown.
 ## oveRTOS modules exercised
 
 Same 15 oveRTOS modules as the C variant — see
-[../hiroic/README.md](../hiroic/README.md#overtos-apis-exercised) for
+[hIRoic_oveRTOS](https://github.com/Varcain/hIRoic_oveRTOS#overtos-apis-exercised) for
 the full table.  Notable C++-specific surface:
 
 | Module | C++ binding usage |
