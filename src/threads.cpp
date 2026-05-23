@@ -1,103 +1,109 @@
 #include "hiroic.hpp"
+#include "ir_manager.hpp"
+#include "dsp.hpp"
 #include "ui.hpp"
+#include <ove/console.hpp>
 #include <ove/lvgl.hpp>
+#include <ove/nvs.hpp>
 #include <ove/ove.hpp>
+#include <ove/shell.hpp>
 #include <ove/thread.hpp>
-#include <ove/time.h>
-#include <cstring>
+#include <ove/time.hpp>
+#include <etl/string.h>
+#include <chrono>
 
 namespace hiroic {
 
-void heartbeat_thread(void *)
+using namespace std::chrono_literals;
+
+void heartbeat_thread(ove::stop_token tok)
 {
-	while (true) {
-		ove::Thread<>::sleep_ms(33);
+	while (!tok.stop_requested()) {
+		ove::this_thread::sleep_for(33ms);
 		watchdog_feed();
 
-		int16_t peak = audio_peak.load(std::memory_order_relaxed);
-		ove_lvgl_lock();
+		const int16_t peak =
+			audio_peak.load(std::memory_order_relaxed);
+		ove::lvgl::LvglGuard guard;
 		ui::update_vu(peak);
-		ove_lvgl_unlock();
 	}
 }
 
-void graphics_thread(void *)
+void graphics_thread(ove::stop_token tok)
 {
-	uint64_t last_us = 0;
-	ove_time_get_us(&last_us);
+	uint64_t last_us = ove::time::get_us().value_or(0);
 
-	while (true) {
-		uint64_t now_us = 0;
-		ove_time_get_us(&now_us);
-		uint32_t elapsed_ms =
+	while (!tok.stop_requested()) {
+		const uint64_t now_us = ove::time::get_us().value_or(last_us);
+		const uint32_t elapsed_ms =
 			static_cast<uint32_t>((now_us - last_us) / 1000);
 		last_us = now_us;
 
-		ove_lvgl_lock();
-		ove_lvgl_tick(elapsed_ms);
-		ove_lvgl_handler();
-		ove_lvgl_unlock();
+		{
+			ove::lvgl::LvglGuard guard;
+			ove_lvgl_tick(elapsed_ms);
+			ove_lvgl_handler();
+		}
 
-		ove::Thread<>::sleep_ms(33);
+		ove::this_thread::sleep_for(33ms);
 	}
 }
 
-void input_thread(void *)
+void input_thread(ove::stop_token tok)
 {
-	while (true) {
-		int c = ove_console_getchar();
+	while (!tok.stop_requested()) {
+		const int c = ove::console::getchar();
 		if (c >= 0) {
-			ove_shell_process_char(c);
+			ove::shell::process_char(c);
 		} else {
-			ove::Thread<>::sleep_ms(25);
+			ove::this_thread::sleep_for(25ms);
 		}
 	}
 }
 
-}  // namespace hiroic
+namespace {
 
-#include "ir_manager.hpp"
-#include "dsp.hpp"
-#include "ui.hpp"
-#include <ove/nvs.hpp>
-#include <etl/string.h>
+/* IR buffer is owned exclusively by the loader thread.  Static so it
+ * survives across iterations without going through the stack. */
+int32_t s_ir_buf[kIrMaxLen];
 
-namespace hiroic {
+}  // namespace
 
-/* IR buffer owned by the loader thread. */
-static int32_t s_ir_buf[kIrMaxLen];
-
-void loader_thread(void *)
+void loader_thread(ove::stop_token tok)
 {
-	while (true) {
+	while (!tok.stop_requested()) {
 		IrLoadRequest req{};
-		if (loader_queue().receive(&req, OVE_WAIT_FOREVER) != OVE_OK)
-			continue;
+		loader_queue().receive(req);
 
-		events().set_bits(kEvtIrLoading);
+		(void)events().set_bits(kEvtIrLoading);
 
 		std::optional<ir::Converted> res;
-		if (req.type == LoadType::ByName)
+		switch (req.type) {
+		case LoadType::ByName:
 			res = ir_mgr::load_by_name(req.filename, s_ir_buf);
-		else if (req.type == LoadType::Prev)
+			break;
+		case LoadType::Prev:
 			res = ir_mgr::load_prev(s_ir_buf);
-		else
+			break;
+		case LoadType::Next:
 			res = ir_mgr::load_next(s_ir_buf);
+			break;
+		}
 
 		if (res) {
 			dsp::load_ir({s_ir_buf, res->length}, res->sample_rate);
+			const auto name = ir_mgr::current_name();
 			OVE_LOG_INF("loader: loaded %.*s (%u samples @ %u Hz)",
-				    static_cast<int>(ir_mgr::current_name().size()),
-				    ir_mgr::current_name().data(),
+				    static_cast<int>(name.size()),
+				    name.data(),
 				    res->length, res->sample_rate);
 
-			auto name = ir_mgr::current_name();
-			etl::string<79> zname;
-			zname.assign(name.data(), name.size());
+			etl::string<79> zname{name.data(), name.size()};
 
-			ove_lvgl_lock();
-			ui::update_ir(zname.c_str(), res->length);
-			ove_lvgl_unlock();
+			{
+				ove::lvgl::LvglGuard guard;
+				ui::update_ir(zname.c_str(), res->length);
+			}
 
 			(void)ove::nvs::write("last_ir", name.data(),
 					      name.size());
@@ -105,7 +111,7 @@ void loader_thread(void *)
 			OVE_LOG_ERR("loader: failed");
 		}
 
-		events().clear_bits(kEvtIrLoading);
+		(void)events().clear_bits(kEvtIrLoading);
 	}
 }
 

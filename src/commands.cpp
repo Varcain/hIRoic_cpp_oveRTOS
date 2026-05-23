@@ -24,16 +24,17 @@ void cmd_stats(int, const char *[])
 
 void cmd_bypass(int, const char *[])
 {
-	auto bits = events().get_bits();
-	bool want = (bits & kEvtIrBypass) == 0;
+	const auto bits = events().get_bits();
+	const bool want = (bits & kEvtIrBypass) == 0;
 	if (want)
-		events().set_bits(kEvtIrBypass);
+		(void)events().set_bits(kEvtIrBypass);
 	else
-		events().clear_bits(kEvtIrBypass);
+		(void)events().clear_bits(kEvtIrBypass);
 
 	OVE_LOG_INF("bypass: %s", want ? "ON" : "OFF");
 
-	uint8_t val = want ? static_cast<uint8_t>(kEvtIrBypass) : 0u;
+	const uint8_t val =
+		want ? static_cast<uint8_t>(kEvtIrBypass) : 0u;
 	(void)ove::nvs::write("bypass", &val, sizeof(val));
 }
 
@@ -50,10 +51,11 @@ void queue_request(LoadType type, const char *name = nullptr)
 {
 	IrLoadRequest req{};
 	req.type = type;
-	if (name) {
+	if (name)
 		std::strncpy(req.filename, name, sizeof(req.filename) - 1);
-	}
-	(void)loader_queue().send(req, 0);
+
+	if (!loader_queue().try_send(req))
+		OVE_LOG_WRN("loader queue full, drop request");
 }
 
 void cmd_load(int argc, const char *argv[])
@@ -82,9 +84,9 @@ constexpr ove_shell_cmd kCmds[] = {
 void commands_register()
 {
 	(void)ove::shell::init();
-	for (const auto &c : kCmds) {
+	for (const auto &c : kCmds)
 		(void)ove::shell::register_cmd(&c);
-	}
+
 	OVE_LOG_INF("shell: 6 commands registered");
 }
 
@@ -93,22 +95,21 @@ void restore_from_nvs()
 	(void)ove::nvs::init();
 
 	uint8_t bypass_val = 0;
-	size_t out_len = 0;
-	if (ove::nvs::read("bypass", &bypass_val, sizeof(bypass_val),
-			   &out_len) == OVE_OK
-	    && out_len > 0 && (bypass_val & kEvtIrBypass)) {
-		events().set_bits(kEvtIrBypass);
+	if (const auto r = ove::nvs::read("bypass", &bypass_val,
+					  sizeof(bypass_val));
+	    r && *r > 0 && (bypass_val & kEvtIrBypass)) {
+		(void)events().set_bits(kEvtIrBypass);
 		OVE_LOG_INF("nvs: restored bypass=ON");
 	}
 
 	etl::string<63> saved;
 	saved.uninitialized_resize(saved.capacity());
-	if (ove::nvs::read("last_ir", saved.data(), saved.capacity(), &out_len)
-		    == OVE_OK
-	    && out_len > 0) {
-		saved.uninitialized_resize(std::min(out_len, saved.capacity()));
-		saved.repair();  // ensure trailing NUL is in place
-		OVE_LOG_INF("nvs: would restore last_ir=%s", saved.c_str());
+	if (const auto r = ove::nvs::read("last_ir", saved.data(),
+					  saved.capacity());
+	    r && *r > 0) {
+		saved.uninitialized_resize(std::min(*r, saved.capacity()));
+		saved.repair();
+		OVE_LOG_INF("nvs: restoring last_ir=%s", saved.c_str());
 		queue_request(LoadType::ByName, saved.c_str());
 	}
 }

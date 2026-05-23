@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <ove/eventgroup.hpp>
 #include <ove/queue.hpp>
+#include <ove/thread.hpp>
 #include "app_conf.hpp"
 
 namespace hiroic {
@@ -32,9 +33,9 @@ extern std::atomic<uint32_t> overrun_count;
 extern std::atomic<int16_t>  audio_peak;
 extern std::atomic<int16_t>  rx_peak;
 
-void heartbeat_thread(void *);
-void graphics_thread(void *);
-void input_thread(void *);
-void loader_thread(void *);
+void heartbeat_thread(ove::stop_token tok);
+void graphics_thread(ove::stop_token tok);
+void input_thread(ove::stop_token tok);
+void loader_thread(ove::stop_token tok);
 
 }  // namespace hiroic

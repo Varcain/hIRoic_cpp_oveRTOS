@@ -27,27 +27,26 @@ void set_current(std::string_view name)
 	s_current_name.assign(name.data(), name.size());
 }
 
-std::optional<ir::Converted> load_file(std::string_view name, size_t file_size,
+std::optional<ir::Converted> load_file(std::string_view name,
+				       size_t file_size,
 				       std::span<int32_t> ir_buf)
 {
-	etl::string<79> path;
-	path.assign(name.data(), name.size());
+	etl::string<79> path{name.data(), name.size()};
 
 	ove::File f;
-	if (f.open(path.c_str(), OVE_FS_O_READ) != OVE_OK) {
+	if (!f.open(path.c_str(), OVE_FS_O_READ)) {
 		OVE_LOG_ERR("ir_mgr: open %s failed", path.c_str());
 		return std::nullopt;
 	}
 
-	size_t read_cap = std::min<size_t>(file_size, kWavBufMaxLen);
-	size_t bytes_read = 0;
-	if (f.read(static_cast<void *>(s_wav_buf), read_cap, &bytes_read)
-	    != OVE_OK) {
-		OVE_LOG_ERR("ir_mgr: read %s failed", path);
+	const size_t read_cap = std::min<size_t>(file_size, kWavBufMaxLen);
+	const auto bytes_read = f.read(s_wav_buf, read_cap);
+	if (!bytes_read) {
+		OVE_LOG_ERR("ir_mgr: read %s failed", path.c_str());
 		return std::nullopt;
 	}
 
-	auto parsed = wav::parse({s_wav_buf, bytes_read});
+	const auto parsed = wav::parse({s_wav_buf, *bytes_read});
 	if (!parsed)
 		return std::nullopt;
 
@@ -61,7 +60,7 @@ std::optional<ir::Converted> load_file(std::string_view name, size_t file_size,
 
 bool init()
 {
-	if (ove_fs_mount(nullptr, nullptr) != OVE_OK) {
+	if (!ove::fs::mount(nullptr, nullptr)) {
 		OVE_LOG_WRN("ir_mgr: fs mount failed (SD not available)");
 		s_available = false;
 		return false;
@@ -85,11 +84,13 @@ std::optional<ir::Converted> load_by_name(std::string_view name,
 		return std::nullopt;
 
 	ove::Dir dir;
-	if (dir.open("/") != OVE_OK)
+	if (!dir.open("/"))
 		return std::nullopt;
 
 	ove_dirent entry{};
-	while (dir.readdir(&entry) == OVE_OK && entry.name[0] != 0) {
+	while (auto more = dir.readdir(&entry)) {
+		if (!*more || entry.name[0] == 0)
+			break;
 		if (name == entry.name)
 			return load_file(entry.name, entry.size, ir_buf);
 	}
@@ -104,13 +105,15 @@ std::optional<ir::Converted> load_next(std::span<int32_t> ir_buf)
 		return std::nullopt;
 
 	ove::Dir dir;
-	if (dir.open("/") != OVE_OK)
+	if (!dir.open("/"))
 		return std::nullopt;
 
 	ove_dirent entry{};
 	bool found_current = (s_current_name == "default");
 
-	while (dir.readdir(&entry) == OVE_OK && entry.name[0] != 0) {
+	while (auto more = dir.readdir(&entry)) {
+		if (!*more || entry.name[0] == 0)
+			break;
 		if (!ir::is_wav(entry.name))
 			continue;
 		if (found_current)
@@ -119,11 +122,13 @@ std::optional<ir::Converted> load_next(std::span<int32_t> ir_buf)
 			found_current = true;
 	}
 
-	/* Wrap: restart and take the first WAV */
+	/* Wrap: restart and take the first WAV. */
 	dir = ove::Dir{};
-	if (dir.open("/") != OVE_OK)
+	if (!dir.open("/"))
 		return std::nullopt;
-	while (dir.readdir(&entry) == OVE_OK && entry.name[0] != 0) {
+	while (auto more = dir.readdir(&entry)) {
+		if (!*more || entry.name[0] == 0)
+			break;
 		if (ir::is_wav(entry.name))
 			return load_file(entry.name, entry.size, ir_buf);
 	}
@@ -136,7 +141,7 @@ std::optional<ir::Converted> load_prev(std::span<int32_t> ir_buf)
 		return std::nullopt;
 
 	ove::Dir dir;
-	if (dir.open("/") != OVE_OK)
+	if (!dir.open("/"))
 		return std::nullopt;
 
 	etl::string<63> prev;
@@ -144,7 +149,9 @@ std::optional<ir::Converted> load_prev(std::span<int32_t> ir_buf)
 	bool found = false;
 
 	ove_dirent entry{};
-	while (dir.readdir(&entry) == OVE_OK && entry.name[0] != 0) {
+	while (auto more = dir.readdir(&entry)) {
+		if (!*more || entry.name[0] == 0)
+			break;
 		if (!ir::is_wav(entry.name))
 			continue;
 		if (s_current_name == entry.name) {
@@ -156,7 +163,9 @@ std::optional<ir::Converted> load_prev(std::span<int32_t> ir_buf)
 			last.assign(entry.name);
 	}
 	if (found) {
-		while (dir.readdir(&entry) == OVE_OK && entry.name[0] != 0) {
+		while (auto more = dir.readdir(&entry)) {
+			if (!*more || entry.name[0] == 0)
+				break;
 			if (ir::is_wav(entry.name))
 				last.assign(entry.name);
 		}
@@ -175,12 +184,14 @@ unsigned int count()
 		return 0;
 
 	ove::Dir dir;
-	if (dir.open("/") != OVE_OK)
+	if (!dir.open("/"))
 		return 0;
 
 	unsigned int n = 0;
 	ove_dirent entry{};
-	while (dir.readdir(&entry) == OVE_OK && entry.name[0] != 0) {
+	while (auto more = dir.readdir(&entry)) {
+		if (!*more || entry.name[0] == 0)
+			break;
 		if (ir::is_wav(entry.name))
 			++n;
 	}

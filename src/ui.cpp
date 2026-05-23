@@ -7,10 +7,14 @@ namespace hiroic::ui {
 
 namespace lv = ove::lvgl;
 
-static lv::Label s_cpu_label{nullptr};
-static lv::Label s_ir_label{nullptr};
-static lv::Bar   s_vu_bar{nullptr};
-static bool      s_initialized = false;
+namespace {
+
+lv::Label s_cpu_label{nullptr};
+lv::Label s_ir_label{nullptr};
+lv::Bar   s_vu_bar{nullptr};
+bool      s_initialized = false;
+
+}  // namespace
 
 int create_widgets(const char *title)
 {
@@ -66,7 +70,7 @@ void update_vu(int16_t peak)
 {
 	if (!s_initialized)
 		return;
-	uint32_t level =
+	const uint32_t level =
 		(peak > 0 ? static_cast<uint32_t>(peak) : 0u) * 100u / 32767u;
 	s_vu_bar.value(static_cast<int32_t>(level), LV_ANIM_OFF);
 }
